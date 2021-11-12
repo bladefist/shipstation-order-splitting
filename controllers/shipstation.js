@@ -43,14 +43,18 @@ const analyzeOrders = async (newOrders) => {
           order.items.map((item) => {
             if (item.warehouseLocation != null) {
               return item.warehouseLocation;
+            } else {
+              return '';
             }
           })
         ),
       ];
 
+      
+
       // If there are multiple warehouse locations, split the order.
       if (warehouses.length > 1) {
-        const orderUpdateArray = splitShipstationOrder(order, warehouses);
+        const orderUpdateArray = splitShipstationOrder(order, warehouses);        
         await shipstationApiCall(
           "https://ssapi.shipstation.com/orders/createorders",
           "post",
@@ -82,15 +86,18 @@ const splitShipstationOrder = (order, warehouses) => {
       let tempOrder = { ...order };
 
       // Give the new order a number to include the warehouse as a suffix.
-      tempOrder.orderNumber = `${tempOrder.orderNumber}-${warehouses[x]}`;
+      if (warehouses[x] !== '') {
+        tempOrder.orderNumber = `${tempOrder.orderNumber}-${warehouses[x]}`;
+      }      
 
       // Filter for the order items for this specific warehouse.
       tempOrder.items = tempOrder.items.filter((item) => {
-        // If the item's warehouseLocation is null, assign it to the first warehouse present.
-        if (item.warehouseLocation == null && x === 0) {
-          item.warehouseLocation = warehouses[x];
-        }
-        return item.warehouseLocation === warehouses[x];
+        // If the item's warehouseLocation is null, assign it to the first warehouse present.    
+        if (warehouses[x] === '') {
+          return item.warehouseLocation === null;
+        } else {
+          return item.warehouseLocation !== null && item.warehouseLocation === warehouses[x];
+        }        
       });
 
       // If this is not the first (primary) order, set the object to create new order in ShipStation.
