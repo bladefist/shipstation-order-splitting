@@ -86,9 +86,9 @@ const splitShipstationOrder = (order, warehouses) => {
       let tempOrder = { ...order };
 
       // Give the new order a number to include the warehouse as a suffix.
-      if (warehouses[x] !== '') {
-        tempOrder.orderNumber = `${tempOrder.orderNumber}-${warehouses[x]}`;
-      }      
+      if (warehouses[x] === '') {
+        tempOrder.orderNumber = `${tempOrder.orderNumber}-E`;
+      } 
 
       // Filter for the order items for this specific warehouse.
       tempOrder.items = tempOrder.items.filter((item) => {
