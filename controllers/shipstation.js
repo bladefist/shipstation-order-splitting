@@ -1,4 +1,5 @@
 const axios = require("axios");
+const e = require("express");
 
 /**
  * Receives and processes a new order webhook from ShipStation.
@@ -13,14 +14,20 @@ exports.newOrders = async (req, res, next) => {
 
     // If there are new orders, analyze the new orders.
     if (response.data.orders.length >= 1) {
-      analyzeOrders(response.data.orders);
-    }
+      let newOrders = await analyzeOrders(response.data.orders);
 
-    // Reply to the REST API request that new orders have been analyzed.
-    res.status(200).json({
-      message: `Analyzed ${response.data.orders.length} new order(s).`,
-      data: response.data.orders,
-    });
+      res.status(200).json({
+        message: `Analyzed ${response.data.orders.length} new order(s).`,
+        data: newOrders,
+      });
+    }
+    else {
+      res.status(200).json({
+        message: `Analyzed ${response.data.orders.length} new order(s).`,
+        data: response.data.orders,
+      });
+    }
+    
   } catch (err) {
     throw new Error(err);
   }
@@ -41,11 +48,7 @@ const analyzeOrders = async (newOrders) => {
       const warehouses = [
         ...new Set(
           order.items.map((item) => {
-            if (item.warehouseLocation != null) {
-              return item.warehouseLocation;
-            } else {
-              return '';
-            }
+            return item.warehouseLocation;
           })
         ),
       ];
@@ -58,7 +61,7 @@ const analyzeOrders = async (newOrders) => {
         await shipstationApiCall(
           "https://ssapi.shipstation.com/orders/createorders",
           "post",
-          orderUpdateArray
+           orderUpdateArray
         );
       }
     } catch (err) {
@@ -82,33 +85,54 @@ const splitShipstationOrder = (order, warehouses) => {
   // Loop through every warehouse present on the order.
   for (let x = 0; x < warehouses.length; x++) {
     try {
+      let warehouse = warehouses[x];
+
+      let shipFromWarehouse = warehouse === 'MN';
+      let putInHoldState = warehouse === null;
+
       // Create a copy of the original order object.
       let tempOrder = { ...order };
 
       // Give the new order a number to include the warehouse as a suffix.
-      if (warehouses[x] === '') {
-        tempOrder.orderNumber = `${tempOrder.orderNumber}-E`;
+      if (shipFromWarehouse == false) {
+        if (putInHoldState) {
+          tempOrder.orderNumber = `${tempOrder.orderNumber}-H`;
+          tempOrder.orderStatus = 'on_hold'
+        } else {
+          tempOrder.orderNumber = `${tempOrder.orderNumber}-C`;
+          tempOrder.orderStatus = 'cancelled'          
+        }
       } 
 
       // Filter for the order items for this specific warehouse.
       tempOrder.items = tempOrder.items.filter((item) => {
-        // If the item's warehouseLocation is null, assign it to the first warehouse present.    
-        if (warehouses[x] === '') {
-          return item.warehouseLocation === null;
+        // If the item's warehouseLocation is null, assign it to the first warehouse present.   
+        if (item.lineItemKey === 'discount') {
+          return false;
+        }
+        else if (shipFromWarehouse) {
+          return item.warehouseLocation === 'MN';
         } else {
-          return item.warehouseLocation !== null && item.warehouseLocation === warehouses[x];
+          return item.warehouseLocation === warehouse;
         }        
       });
 
       // If this is not the first (primary) order, set the object to create new order in ShipStation.
-      if (x !== 0) {
+      if (!shipFromWarehouse) {
         delete tempOrder.orderKey;
         delete tempOrder.orderId;
         tempOrder.amountPaid = 0;
         tempOrder.taxAmount = 0;
         tempOrder.shippingAmopunt = 0;
-      }
-      orderUpdateArray.push(tempOrder);
+
+        //new temp order might be a discount only, which is gone. don't create it.
+        if (tempOrder.items.length > 0) {
+          orderUpdateArray.push(tempOrder);
+        }    
+      } else {
+        orderUpdateArray.push(tempOrder);
+      }  
+      
     } catch (err) {
       throw new Error(err);
     }
@@ -132,7 +156,6 @@ const shipstationApiCall = async (url, method, body) => {
       method: method || "get",
       url: url,
       headers: {
-        // Your API Authorization token goes here.
         Authorization: process.env.SHIPSTATION_API_KEY,
         "Content-Type": "application/json",
       },
